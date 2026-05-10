@@ -167,7 +167,7 @@ if __name__ == "__main__":
     bins_frame = tk.Frame(params_frame)
     bins_frame.pack(side=tk.LEFT, padx=5)
     tk.Label(bins_frame, text="Bins:").pack()
-    bins_var = tk.IntVar(value=12)
+    bins_var = tk.IntVar(value=240)
     bins_scale = tk.Scale(bins_frame, from_=12, to=480, orient=tk.VERTICAL, variable=bins_var)
     bins_scale.pack()
     
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     smooth_frame = tk.Frame(params_frame)
     smooth_frame.pack(side=tk.LEFT, padx=5)
     tk.Label(smooth_frame, text="Smoothing:").pack()
-    smooth_var = tk.DoubleVar(value=1.0)
+    smooth_var = tk.DoubleVar(value=0.2)
     smooth_scale = tk.Scale(smooth_frame, from_=0.0, to=3.0, resolution=0.1, orient=tk.VERTICAL, variable=smooth_var)
     smooth_scale.pack()
     
