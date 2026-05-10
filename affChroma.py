@@ -19,7 +19,7 @@ def freq_to_cyclic_octave_position(freq):
     return pitch_class / 12.0
 
 
-def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.0):
+def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=1.0):
     audio, sr = sf.read(path)
 
     if audio.ndim > 1:
@@ -52,6 +52,16 @@ def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_
 
     if np.max(histogram) > 0:
         histogram /= np.max(histogram)
+
+    if smoothing > 0 and bins > 12:
+        sigma = smoothing * (bins / 12.0)
+        x = np.arange(bins)
+        dist = np.minimum(x, bins - x)
+        kernel = np.exp(-0.5 * (dist / sigma)**2)
+        kernel /= np.sum(kernel)
+        hist_fft = np.fft.fft(histogram)
+        kernel_fft = np.fft.fft(kernel)
+        histogram = np.fft.ifft(hist_fft * kernel_fft).real
 
     return histogram
 
@@ -131,7 +141,7 @@ if __name__ == "__main__":
     if initial_file:
         path = os.path.join(folder, initial_file)
         try:
-            histograms[initial_file] = analyze_file(path, bins=12, fft_size=8192, hop_size=1000, min_freq=20, max_freq=10000, attenuation_exponent=0.5)
+            histograms[initial_file] = analyze_file(path, bins=12, fft_size=8192, hop_size=1000, min_freq=20, max_freq=10000, attenuation_exponent=0.5, smoothing=1.0)
         except Exception as e:
             print(f"Error analyzing {initial_file}: {e}")
 
@@ -151,37 +161,63 @@ if __name__ == "__main__":
     
     # Parameters
     params_frame = tk.Frame(root)
-    params_frame.pack()
+    params_frame.pack(side=tk.TOP)
     
-    tk.Label(params_frame, text="Bins:").grid(row=0, column=0)
+    # Bins
+    bins_frame = tk.Frame(params_frame)
+    bins_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(bins_frame, text="Bins:").pack()
     bins_var = tk.IntVar(value=12)
-    bins_scale = tk.Scale(params_frame, from_=12, to=480, orient=tk.HORIZONTAL, variable=bins_var)
-    bins_scale.grid(row=0, column=1)
+    bins_scale = tk.Scale(bins_frame, from_=12, to=480, orient=tk.VERTICAL, variable=bins_var)
+    bins_scale.pack()
     
-    tk.Label(params_frame, text="FFT Size:").grid(row=1, column=0)
+    # FFT Size
+    fft_frame = tk.Frame(params_frame)
+    fft_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(fft_frame, text="FFT Size:").pack()
     fft_var = tk.IntVar(value=8192)
-    fft_scale = tk.Scale(params_frame, from_=2048, to=8192, orient=tk.HORIZONTAL, variable=fft_var)
-    fft_scale.grid(row=1, column=1)
+    fft_scale = tk.Scale(fft_frame, from_=2048, to=8192, orient=tk.VERTICAL, variable=fft_var)
+    fft_scale.pack()
     
-    tk.Label(params_frame, text="Hop Size:").grid(row=2, column=0)
+    # Hop Size
+    hop_frame = tk.Frame(params_frame)
+    hop_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(hop_frame, text="Hop Size:").pack()
     hop_var = tk.IntVar(value=1000)
-    hop_scale = tk.Scale(params_frame, from_=256, to=2048, orient=tk.HORIZONTAL, variable=hop_var)
-    hop_scale.grid(row=2, column=1)
+    hop_scale = tk.Scale(hop_frame, from_=256, to=2048, orient=tk.VERTICAL, variable=hop_var)
+    hop_scale.pack()
     
-    tk.Label(params_frame, text="Min Freq:").grid(row=3, column=0)
+    # Min Freq
+    minf_frame = tk.Frame(params_frame)
+    minf_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(minf_frame, text="Min Freq:").pack()
     minf_var = tk.IntVar(value=20)
-    minf_scale = tk.Scale(params_frame, from_=20, to=200, orient=tk.HORIZONTAL, variable=minf_var)
-    minf_scale.grid(row=3, column=1)
+    minf_scale = tk.Scale(minf_frame, from_=20, to=200, orient=tk.VERTICAL, variable=minf_var)
+    minf_scale.pack()
     
-    tk.Label(params_frame, text="Max Freq:").grid(row=4, column=0)
+    # Max Freq
+    maxf_frame = tk.Frame(params_frame)
+    maxf_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(maxf_frame, text="Max Freq:").pack()
     maxf_var = tk.IntVar(value=10000)
-    maxf_scale = tk.Scale(params_frame, from_=4000, to=16000, orient=tk.HORIZONTAL, variable=maxf_var)
-    maxf_scale.grid(row=4, column=1)
+    maxf_scale = tk.Scale(maxf_frame, from_=4000, to=16000, orient=tk.VERTICAL, variable=maxf_var)
+    maxf_scale.pack()
     
-    tk.Label(params_frame, text="Freq Atten Exp:").grid(row=5, column=0)
+    # Freq Atten Exp
+    atten_frame = tk.Frame(params_frame)
+    atten_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(atten_frame, text="Freq Atten Exp:").pack()
     atten_var = tk.DoubleVar(value=0.5)
-    atten_scale = tk.Scale(params_frame, from_=0.0, to=2.0, resolution=0.1, orient=tk.HORIZONTAL, variable=atten_var)
-    atten_scale.grid(row=5, column=1)
+    atten_scale = tk.Scale(atten_frame, from_=0.0, to=2.0, resolution=0.1, orient=tk.VERTICAL, variable=atten_var)
+    atten_scale.pack()
+    
+    # Smoothing
+    smooth_frame = tk.Frame(params_frame)
+    smooth_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(smooth_frame, text="Smoothing:").pack()
+    smooth_var = tk.DoubleVar(value=1.0)
+    smooth_scale = tk.Scale(smooth_frame, from_=0.0, to=3.0, resolution=0.1, orient=tk.VERTICAL, variable=smooth_var)
+    smooth_scale.pack()
     
     # Plot canvas
     fig = Figure(figsize=(14, 4))
@@ -214,7 +250,7 @@ if __name__ == "__main__":
             # Re-analyze with current params
             path = os.path.join(folder, selected)
             try:
-                hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get())
+                hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get())
                 title = selected
             except Exception as e:
                 print(f"Error analyzing {selected}: {e}")
@@ -274,7 +310,7 @@ if __name__ == "__main__":
         filename = files[process_state["idx"]]
         path = os.path.join(folder, filename)
         try:
-            hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get())
+            hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get())
             process_state["histograms"][filename] = hist
             if process_state.get("combined") is None:
                 process_state["combined"] = hist.copy()
