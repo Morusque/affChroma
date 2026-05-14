@@ -35,20 +35,17 @@ def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_
 
     positions = freq_to_cyclic_octave_position(valid_freqs)
     bin_positions = positions * bins
+    bin_indices = np.round(bin_positions).astype(int) % bins
+    if attenuation_exponent > 0:
+        weights = (min_freq / valid_freqs) ** attenuation_exponent
+    else:
+        weights = np.ones_like(valid_freqs)
 
     for start in range(0, len(audio) - fft_size, hop_size):
         frame = audio[start:start + fft_size] * window
         spectrum = np.abs(np.fft.rfft(frame))
         spectrum = spectrum[valid]
-
-        for i, (pos, amp) in enumerate(zip(bin_positions, spectrum)):
-            freq = valid_freqs[i]
-            if attenuation_exponent > 0:
-                weight = (min_freq / freq) ** attenuation_exponent
-            else:
-                weight = 1.0
-            bin_index = int(np.round(pos)) % bins
-            histogram[bin_index] += amp * weight
+        histogram += np.bincount(bin_indices, weights=spectrum * weights, minlength=bins)
 
     if np.max(histogram) > 0:
         histogram /= np.max(histogram)
