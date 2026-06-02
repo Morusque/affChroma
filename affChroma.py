@@ -73,7 +73,7 @@ def _analysis_fft_size(sr, min_freq):
     return 1 << max(12, int(np.ceil(np.log2(needed))))
 
 
-def analyze_file_stable(path, bins=240, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2):
+def analyze_file_stable(path, bins=240, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.05):
     audio, sr = sf.read(path)
     audio = _normalize_audio(audio)
 
@@ -112,7 +112,7 @@ def analyze_file_stable(path, bins=240, hop_size=1024, min_freq=40, max_freq=800
     return histogram
 
 
-def analyze_file_fft(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2):
+def analyze_file_fft(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.05):
     audio, sr = sf.read(path)
     audio = _normalize_audio(audio)
 
@@ -142,7 +142,7 @@ def analyze_file_fft(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, 
     return histogram
 
 
-def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2, method="Stable"):
+def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.05, method="Stable"):
     if method == "FFT":
         return analyze_file_fft(path, bins, fft_size, hop_size, min_freq, max_freq, attenuation_exponent, smoothing)
     return analyze_file_stable(path, bins, hop_size, min_freq, max_freq, attenuation_exponent, smoothing)
@@ -305,7 +305,7 @@ if __name__ == "__main__":
     smooth_frame = tk.Frame(params_frame)
     smooth_frame.pack(side=tk.LEFT, padx=5)
     tk.Label(smooth_frame, text="Smoothing:").pack()
-    smooth_var = tk.DoubleVar(value=0.2)
+    smooth_var = tk.DoubleVar(value=0.05)
     smooth_scale = tk.Scale(smooth_frame, from_=0.0, to=3.0, resolution=0.1, orient=tk.VERTICAL, variable=smooth_var)
     smooth_scale.pack()
     
