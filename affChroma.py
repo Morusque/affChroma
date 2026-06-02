@@ -19,11 +19,102 @@ def freq_to_cyclic_octave_position(freq):
     return pitch_class / 12.0
 
 
-def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=1.0):
-    audio, sr = sf.read(path)
-
+def _normalize_audio(audio):
     if audio.ndim > 1:
         audio = np.mean(audio, axis=1)
+    return audio.astype(np.float32, copy=False)
+
+
+def _normalize_histogram(histogram):
+    peak = np.max(histogram)
+    if peak > 0:
+        histogram = histogram / peak
+    return histogram
+
+
+def _smooth_cyclic_histogram(histogram, smoothing):
+    bins = len(histogram)
+    if smoothing <= 0 or bins <= 12:
+        return histogram
+
+    sigma = smoothing * (bins / 12.0)
+    x = np.arange(bins)
+    dist = np.minimum(x, bins - x)
+    kernel = np.exp(-0.5 * (dist / sigma)**2)
+    kernel /= np.sum(kernel)
+    hist_fft = np.fft.fft(histogram)
+    kernel_fft = np.fft.fft(kernel)
+    return np.fft.ifft(hist_fft * kernel_fft).real
+
+
+def _add_soft_pitch_bins(histogram, positions, magnitudes, width_bins=1.0):
+    # Do not quantize each frequency to a single pitch bin. Spread it over a
+    # few neighboring cyclic bins so tiny tuning/FFT-grid differences move the
+    # peak gradually instead of causing a visible jump.
+    bins = len(histogram)
+    bin_positions = positions * bins
+    centers = np.round(bin_positions).astype(int)
+    offsets = np.arange(-2, 3)
+    all_indices = (centers[:, None] + offsets[None, :]) % bins
+    dist = np.abs(all_indices - bin_positions[:, None])
+    dist = np.minimum(dist, bins - dist)
+    local_weights = np.exp(-0.5 * (dist / width_bins)**2)
+    local_weights /= np.sum(local_weights, axis=1, keepdims=True)
+    np.add.at(histogram, all_indices.ravel(), (magnitudes[:, None] * local_weights).ravel())
+
+
+def _analysis_fft_size(sr, min_freq):
+    # Stable mode deliberately ignores the user-facing FFT size. Instead it
+    # chooses a window long enough to resolve low notes consistently. Sixteen
+    # cycles at the minimum frequency is a practical compromise for whole-track
+    # chroma summaries: slow, but much less dependent on the FFT frequency grid.
+    cycles_at_min_freq = 16
+    needed = int(np.ceil(sr * cycles_at_min_freq / max(float(min_freq), 20.0)))
+    return 1 << max(12, int(np.ceil(np.log2(needed))))
+
+
+def analyze_file_stable(path, bins=240, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2):
+    audio, sr = sf.read(path)
+    audio = _normalize_audio(audio)
+
+    # This is still an FFT internally, but it is no longer a user-controlled
+    # FFT. Keeping this size fixed for a given sample rate and min_freq makes
+    # the chromagram comparable across runs and across files.
+    analysis_size = _analysis_fft_size(sr, min_freq)
+    window = np.hanning(analysis_size)
+    freqs = np.fft.rfftfreq(analysis_size, 1 / sr)
+
+    # Convert each linear FFT frequency to cyclic pitch position:
+    # C, C#, D, ... B, then wrap all octaves onto the same 0..1 cycle.
+    valid = (freqs >= min_freq) & (freqs <= max_freq)
+    valid_freqs = freqs[valid]
+    positions = freq_to_cyclic_octave_position(valid_freqs)
+
+    # Higher harmonics and high-frequency bins can dominate raw magnitude
+    # sums. This attenuation keeps the display closer to perceived pitch
+    # weight while still letting upper partials contribute to the chroma.
+    if attenuation_exponent > 0:
+        weights = (min_freq / valid_freqs) ** attenuation_exponent
+    else:
+        weights = np.ones_like(valid_freqs)
+
+    histogram = np.zeros(bins)
+    hop = min(hop_size, analysis_size // 4)
+    for start in range(0, len(audio) - analysis_size, hop):
+        frame = audio[start:start + analysis_size] * window
+        spectrum = np.abs(np.fft.rfft(frame))[valid]
+        _add_soft_pitch_bins(histogram, positions, spectrum * weights, width_bins=max(1.0, bins / 180.0))
+
+    # Normalize before cyclic smoothing so the graph emphasizes pitch-class
+    # shape rather than absolute file loudness.
+    histogram = _normalize_histogram(histogram)
+    histogram = _smooth_cyclic_histogram(histogram, smoothing)
+    return histogram
+
+
+def analyze_file_fft(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2):
+    audio, sr = sf.read(path)
+    audio = _normalize_audio(audio)
 
     histogram = np.zeros(bins)
 
@@ -34,8 +125,6 @@ def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_
     valid_freqs = freqs[valid]
 
     positions = freq_to_cyclic_octave_position(valid_freqs)
-    bin_positions = positions * bins
-    bin_indices = np.round(bin_positions).astype(int) % bins
     if attenuation_exponent > 0:
         weights = (min_freq / valid_freqs) ** attenuation_exponent
     else:
@@ -45,22 +134,18 @@ def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_
         frame = audio[start:start + fft_size] * window
         spectrum = np.abs(np.fft.rfft(frame))
         spectrum = spectrum[valid]
-        histogram += np.bincount(bin_indices, weights=spectrum * weights, minlength=bins)
+        _add_soft_pitch_bins(histogram, positions, spectrum * weights, width_bins=max(1.0, bins / 240.0))
 
-    if np.max(histogram) > 0:
-        histogram /= np.max(histogram)
-
-    if smoothing > 0 and bins > 12:
-        sigma = smoothing * (bins / 12.0)
-        x = np.arange(bins)
-        dist = np.minimum(x, bins - x)
-        kernel = np.exp(-0.5 * (dist / sigma)**2)
-        kernel /= np.sum(kernel)
-        hist_fft = np.fft.fft(histogram)
-        kernel_fft = np.fft.fft(kernel)
-        histogram = np.fft.ifft(hist_fft * kernel_fft).real
+    histogram = _normalize_histogram(histogram)
+    histogram = _smooth_cyclic_histogram(histogram, smoothing)
 
     return histogram
+
+
+def analyze_file(path, bins=240, fft_size=4096, hop_size=1024, min_freq=40, max_freq=8000, attenuation_exponent=0.5, smoothing=0.2, method="Stable"):
+    if method == "FFT":
+        return analyze_file_fft(path, bins, fft_size, hop_size, min_freq, max_freq, attenuation_exponent, smoothing)
+    return analyze_file_stable(path, bins, hop_size, min_freq, max_freq, attenuation_exponent, smoothing)
 
 
 def merge_to_12_notes(histogram):
@@ -159,6 +244,14 @@ if __name__ == "__main__":
     # Parameters
     params_frame = tk.Frame(root)
     params_frame.pack(side=tk.TOP)
+
+    # Analysis Method
+    method_frame = tk.Frame(params_frame)
+    method_frame.pack(side=tk.LEFT, padx=5)
+    tk.Label(method_frame, text="Method:").pack()
+    method_var = tk.StringVar(value="Stable")
+    method_combo = ttk.Combobox(method_frame, textvariable=method_var, values=["Stable", "FFT"], width=7, state="readonly")
+    method_combo.pack()
     
     # Bins
     bins_frame = tk.Frame(params_frame)
@@ -247,7 +340,7 @@ if __name__ == "__main__":
             # Re-analyze with current params
             path = os.path.join(folder, selected)
             try:
-                hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get())
+                hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get(), method=method_var.get())
                 title = selected
             except Exception as e:
                 print(f"Error analyzing {selected}: {e}")
@@ -307,7 +400,7 @@ if __name__ == "__main__":
         filename = files[process_state["idx"]]
         path = os.path.join(folder, filename)
         try:
-            hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get())
+            hist = analyze_file(path, bins=bins_var.get(), fft_size=fft_var.get(), hop_size=hop_var.get(), min_freq=minf_var.get(), max_freq=maxf_var.get(), attenuation_exponent=atten_var.get(), smoothing=smooth_var.get(), method=method_var.get())
             process_state["histograms"][filename] = hist
             if process_state.get("combined") is None:
                 process_state["combined"] = hist.copy()
